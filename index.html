@@ -1,0 +1,593 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<meta property="og:title" content="NUMBLE! — Prime Factor Puzzle" />
+<meta name="theme-color" content="#000000" />
+<title>Numble! — JS (Carry Bonus + Reveal on Loss + Centering)</title>
+<style>
+  :root{
+    --bg:#000; --fg:#fff; --border:#999;
+    --right:#00ff00; --present:#f1c232; --absent:#b7b7b7; /* light gray like Pygame */
+    --prime:#00c8c8; --gold:#ffd700; --light:#bebebe;
+  }
+  *{box-sizing:border-box}
+  html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial}
+  .wrap{min-height:100%;display:flex;align-items:center;justify-content:center;padding:12px}
+  .stage{
+    width:600px;height:750px;position:relative;background:#000;
+    border:1px solid #222;border-radius:16px;display:flex;flex-direction:column;overflow:hidden;
+    box-shadow:0 10px 40px rgba(0,0,0,.6);
+  }
+  header{padding:10px 16px;border-bottom:1px solid #222;display:flex;align-items:center;justify-content:center;gap:10px}
+  header h1{margin:0;font-size:18px;letter-spacing:.12em;font-weight:900}
+  header .debug{color:#888;font-weight:600}
+  main{flex:1;display:flex;flex-direction:column}
+
+  /* Shared primes row */
+  .factors{height:110px;display:flex;align-items:center;justify-content:center;padding:6px 12px}
+  .pf{display:flex;gap:10px;flex-wrap:nowrap;overflow:hidden;align-items:center}
+  .pf-box{
+    min-width:36px;min-height:36px;border:2px solid var(--border);border-radius:12px;display:flex;align-items:center;justify-content:center;
+    color:var(--prime);font-weight:700;background:#000;padding:0 8px
+  }
+
+  /* Board area */
+  .board{flex:1;display:flex;align-items:center;justify-content:center;padding:0 20px}
+  .gridWrap{
+    width:100%;
+    display:flex; justify-content:center; align-items:flex-start;
+    overflow-y:auto; overflow-x:hidden;
+    scrollbar-gutter: stable both-edges; /* keeps center aligned even with scrollbar */
+  }
+  .grid{display:grid}
+  .tile{
+    width:64px;height:64px;border-radius:12px;
+    border:2px solid var(--border);background:#000;display:flex;align-items:center;justify-content:center;
+    font-weight:800;font-size:28px;color:#fff;position:relative;
+  }
+  .tile.correct{background:var(--right);border-color:var(--right);color:#000}
+  .tile.present{background:var(--present);border-color:var(--present);color:#000}
+  .tile.absent{background:var(--absent);border-color:var(--absent);color:#000}
+  .tile .blink{
+    position:absolute;inset:0;border-radius:12px;border:2px solid var(--prime);pointer-events:none;
+    opacity:1;transition:opacity .15s linear;
+  }
+  .blink.off{opacity:0}
+
+  footer{height:86px;border-top:1px solid #222;padding:8px 10px 12px;color:#bbb}
+  .row{display:flex;justify-content:center;font-size:14px}
+  .row.top{color:var(--gold);font-weight:600}
+  .row .pad{padding:0 16px}
+
+  /* Overlays */
+  .overlay{position:absolute;inset:0;background:rgba(0,0,0,.78);display:none;align-items:center;justify-content:center;padding:20px;z-index:10}
+  .overlay.show{display:flex}
+  .modal{width:min(560px,90%);background:#0c0c0c;border:1px solid #333;border-radius:16px;padding:18px 18px 14px;text-align:left}
+  .modal h2{margin:0 0 8px;font-size:24px;letter-spacing:.08em}
+  .center{text-align:center}
+  .gold{color:var(--gold)}
+  .muted{color:var(--light)}
+
+  /* Bullet list */
+  .bullet-box{margin-top:8px}
+  .bullet-item{font-size:22px; line-height:1.35; padding-left:26px; text-indent:-26px; margin:0 0 8px 0; color:#fff}
+  .bullet-item::before{content:"• "; color:#fff}
+  .prompt{font-size:18px;color:var(--light);text-align:center;margin-top:10px}
+
+  /* Buttons */
+  .btnbar{display:flex;gap:10px;flex-wrap:wrap;margin-top:10px;justify-content:center}
+  .btn{background:#1b1b1b;border:1px solid #444;border-radius:10px;color:#fff;padding:10px 14px;font-weight:700;cursor:pointer}
+  .btn.primary{background:#036}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="stage" id="stage">
+    <header><h1>NUMBLE!</h1><span class="debug" id="debugSecret"></span></header>
+
+    <main>
+      <!-- Shared primes -->
+      <div class="factors" id="factors"><div class="pf" id="pf"></div></div>
+
+      <!-- Guess board -->
+      <div class="board">
+        <div class="gridWrap" id="gridWrap">
+          <div class="grid" id="grid"></div>
+        </div>
+      </div>
+    </main>
+
+    <footer id="footer">
+      <div class="row top"><span class="pad" id="scoreLine">Score: 0</span><span class="pad" id="winsLine">Games Won: 0</span><span class="pad" id="hintsLine">Hints: 2</span></div>
+      <div class="row"><span class="pad">Q = Quit</span><span class="pad">N = New Game</span><span class="pad" id="triesLine">Tries left: —</span><span class="pad" id="levelLine">Level: —</span></div>
+    </footer>
+
+    <!-- Splash -->
+    <div class="overlay show" id="splash">
+      <div class="modal center">
+        <h2 class="gold">NUMBLE!</h2>
+        <p class="muted" id="splashMsg"></p>
+      </div>
+    </div>
+
+    <!-- How-to -->
+    <div class="overlay" id="howto">
+      <div class="modal">
+        <h2 class="center gold">How to Play</h2>
+        <div class="bullet-box" style="max-height:520px; overflow:auto; padding-right:6px;">
+          <p class="bullet-item">Guess the hidden number. Columns = digits; rows = guesses.</p>
+          <p class="bullet-item">Color feedback appears only when your guess reveals no NEW shared prime factors.</p>
+          <p class="bullet-item">Uncolored rows will retro-fill later when a color hint is earned.</p>
+          <p class="bullet-item">Top bar shows cumulative shared prime factors (with multiplicity).</p>
+          <p class="bullet-item">Score more by solving in fewer tries.</p>
+          <p class="bullet-item">Keys: Enter = submit, Backspace = erase, N = new game, Q = quit.</p>
+        </div>
+        <p class="prompt">press any key to continue</p>
+      </div>
+    </div>
+
+    <!-- Level select -->
+    <div class="overlay" id="levels">
+      <div class="modal center">
+        <h2>Select Level</h2>
+        <p class="muted">Choose digits (tries depend on level). Difficulty increases over games by using numbers with more prime factors.</p>
+        <div class="btnbar">
+          <button class="btn primary" data-level="1">1-digit</button>
+          <button class="btn primary" data-level="2">2-digit</button>
+          <button class="btn primary" data-level="3">3-digit</button>
+          <button class="btn primary" data-level="4">4-digit</button>
+        </div>
+      </div>
+    </div>
+
+    <!-- Round result (win only) -->
+    <div class="overlay" id="roundModal">
+      <div class="modal center">
+        <h2 id="roundTitle" class="gold">Correct</h2>
+        <p id="roundScore" class="muted"></p>
+        <div class="btnbar"><button class="btn" id="roundOk">Continue</button></div>
+      </div>
+    </div>
+
+    <!-- Final score (loss or quit) -->
+    <div class="overlay" id="finalModal">
+      <div class="modal center">
+        <h2 class="gold">Final Score</h2>
+        <p id="finalScore" style="font-size:40px; color:#00c8c8; margin:10px 0 6px 0;">0</p>
+        <p id="finalReveal" class="muted" style="margin:4px 0 10px 0; display:none;"></p>
+        <p class="muted">Click or press any key to continue</p>
+        <div class="btnbar"><button class="btn" id="finalOk">Continue</button></div>
+      </div>
+    </div>
+
+  </div>
+</div>
+
+<script>
+(() => {
+  // ====== TOGGLE HERE ======
+  // Set to true to show the secret next to "NUMBLE!" in the header for debugging.
+  const VERBOSE = false;
+
+  const DEFAULT_GUESSES_BY_DIGITS = {1:3, 2:5, 3:6, 4:8};
+  const STARTING_HINTS=2;
+  const ROUNDS_NEEDED_FOR_BONUS_HINT=3;
+
+  let SECRET_DIGITS = 3;
+  let score = 0;
+  let games_won = 1;
+  let gameNum = 0;
+  let bonus_hints = STARTING_HINTS;
+  let carryBonus = 0;                 // carries a one-time bonus into the NEXT round
+
+  let rows=0, cols=0, triesLeft=0;
+  let answerMatrix = [];
+  let colorMatrix = [];
+  let pendingRows = [];
+  let discovered = {};
+  let secret = 0;
+  let buffer = [];
+  let curRow = 0;
+  let running = false;
+
+  const stageEl   = document.getElementById('stage');
+  const gridWrap  = document.getElementById('gridWrap');
+  const gridEl    = document.getElementById('grid');
+  const factorsEl = document.getElementById('factors');
+  const footerEl  = document.getElementById('footer');
+
+  const pfEl     = document.getElementById('pf');
+  const scoreLine= document.getElementById('scoreLine');
+  const winsLine = document.getElementById('winsLine');
+  const hintsLine= document.getElementById('hintsLine');
+  const triesLine= document.getElementById('triesLine');
+  const levelLine= document.getElementById('levelLine');
+  const debugSecret = document.getElementById('debugSecret');
+
+  const splashEl = document.getElementById('splash');
+  const howtoEl  = document.getElementById('howto');
+  const levelsEl = document.getElementById('levels');
+
+  const roundModal  = document.getElementById('roundModal');
+  const roundTitle  = document.getElementById('roundTitle');
+  const roundScore  = document.getElementById('roundScore');
+  const roundOk     = document.getElementById('roundOk');
+
+  const finalModal  = document.getElementById('finalModal');
+  const finalScore  = document.getElementById('finalScore');
+  const finalReveal = document.getElementById('finalReveal');
+  const finalOk     = document.getElementById('finalOk');
+
+  // ---------- math helpers ----------
+  function gcd(a,b){ a=Math.abs(a|0); b=Math.abs(b|0); while(b){ const t=a%b; a=b; b=t; } return a; }
+  function primeFactors(n){
+    n = Math.abs(n|0);
+    const out=[]; let d=2;
+    while(n>1 && d*d<=n){
+      while(n%d===0){ out.push(d); n=(n/d)|0; }
+      d = (d===2)?3:d+2;
+    }
+    if(n>1) out.push(n);
+    return out;
+  }
+  function factorMultisetOf(n){ const c={}; for(const p of primeFactors(n)) c[p]=(c[p]||0)+1; return c; }
+  function mergeMaxCounts(target, add){ for(const p in add){ target[p]=Math.max(target[p]||0, add[p]); } }
+  function countsToList(counts){ const keys=Object.keys(counts).map(Number).sort((a,b)=>a-b); const arr=[]; for(const p of keys){ for(let i=0;i<counts[p];i++) arr.push(p); } return arr; }
+  function randInt(lo,hi){ return Math.floor(Math.random()*(hi-lo+1))+lo; }
+  function countFactors(n){ return primeFactors(n).length; }
+
+  // difficulty: fixed digits, more factors as gameNum grows
+  function selectSecret(){
+    const d   = SECRET_DIGITS;
+    const lo  = (d > 1) ? 10**(d-1) : 2;
+    const hi  = 10**d - 1;
+    const base = Math.max(1, Math.round(Math.log2(10**d) / 3));
+    const need = base + Math.floor(gameNum / 2);
+    while(true){
+      const n = randInt(lo, hi);
+      if(countFactors(n) >= need) return n;
+    }
+  }
+
+  // ---------- board build ----------
+  function initMatrices(){
+    rows = DEFAULT_GUESSES_BY_DIGITS[SECRET_DIGITS] || 6;
+    cols = SECRET_DIGITS;
+    triesLeft = rows;
+
+    // Next-round hint policy:
+    // guaranteed 2, PLUS any banked (bonus_hints may exceed 2 already),
+    // PLUS carryBonus from last round’s achievement
+    bonus_hints = Math.max(bonus_hints, STARTING_HINTS) + carryBonus;
+    carryBonus = 0; // consumed now
+
+    answerMatrix = Array.from({length:rows}, () => Array.from({length:cols}, ()=>' '));
+    colorMatrix  = Array.from({length:rows}, () => Array.from({length:cols}, ()=>'active'));
+    pendingRows  = Array.from({length:rows}, () => true);
+    buffer = [];
+    curRow=0;
+    discovered = {};
+  }
+
+  function computeGridMetrics(){
+    // vertical fit & stable center (scrollbar-gutter keeps axis stable)
+    const stageH   = stageEl.clientHeight;
+    const headH    = stageEl.querySelector('header').offsetHeight;
+    const factorsH = factorsEl.offsetHeight;
+    const footH    = footerEl.offsetHeight;
+    const safePadV = 16;
+    const maxGridH = Math.max(120, stageH - headH - factorsH - footH - safePadV*2);
+    gridWrap.style.maxHeight = `${maxGridH}px`;
+
+    // column/row gaps tuned for levels; center handled by flex wrapper
+    const wrapW = gridWrap.clientWidth;
+    const gapX = (cols>=4) ? 18 : (cols===3 ? 14 : 12);
+    const gapY = 12;
+
+    const tile = Math.min(
+      Math.floor((wrapW - (cols-1)*gapX)/cols),
+      Math.floor((maxGridH - (rows-1)*gapY)/rows)
+    );
+    return {tile: Math.max(36, tile), gapX, gapY};
+  }
+
+  function buildGrid(){
+    const {tile, gapX, gapY} = computeGridMetrics();
+    gridEl.style.gridTemplateColumns = `repeat(${cols}, ${tile}px)`;
+    gridEl.style.columnGap = `${gapX}px`;
+    gridEl.style.rowGap    = `${gapY}px`;
+
+    gridEl.innerHTML='';
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const cell=document.createElement('div');
+        cell.className='tile';
+        cell.dataset.row=r; cell.dataset.col=c;
+        const blink=document.createElement('div'); blink.className='blink off';
+        cell.appendChild(blink);
+        cell.prepend(document.createTextNode(' '));
+        gridEl.appendChild(cell);
+      }
+    }
+    renderAll();
+  }
+
+  function setTile(r,c,txt,cls){
+    const idx = r*cols + c;
+    const el = gridEl.children[idx];
+    el.firstChild.nodeValue = (txt ?? ' ');
+    el.className = 'tile' + (cls ? ' '+cls : '');
+    if(!el.querySelector('.blink')){
+      const b=document.createElement('div'); b.className='blink off'; el.appendChild(b);
+    }
+  }
+
+  function renderAll(){
+    for(let r=0;r<rows;r++){
+      for(let c=0;c<cols;c++){
+        const ch = answerMatrix[r][c];
+        const cm = colorMatrix[r][c];
+        let cls='';
+        if(cm==='correct') cls='correct';
+        else if(cm==='present') cls='present';
+        else if(cm==='absent') cls='absent';
+        setTile(r,c,ch,cls);
+      }
+    }
+    updateHeaderPrimes();
+    updateFooter();
+    updateDebugSecret();
+    renderBlink();
+  }
+
+  function updateHeaderPrimes(){
+    const arr = countsToList(discovered);
+    pfEl.innerHTML='';
+    if(arr.length){
+      for(const p of arr){
+        const b=document.createElement('div');
+        b.className='pf-box';
+        b.textContent=String(p);
+        pfEl.appendChild(b);
+      }
+    }
+  }
+
+  function updateFooter(){
+    scoreLine.textContent = `Score: ${score}`;
+    winsLine.textContent  = `Games Won: ${games_won-1}`;
+    hintsLine.textContent = `Hints: ${bonus_hints}`;
+    triesLine.textContent = `Tries left: ${triesLeft}`;
+    levelLine.textContent = `Level: ${SECRET_DIGITS}-digit`;
+  }
+
+  function updateDebugSecret(){
+    debugSecret.textContent = VERBOSE ? `— ${secret}` : '';
+  }
+
+  // ---------- blink caret ----------
+  let blinkOn=true; setInterval(()=>{ blinkOn=!blinkOn; renderBlink(); }, 400);
+  function renderBlink(){
+    for(const el of gridEl.querySelectorAll('.blink')) el.classList.add('off');
+    if(!running) return;
+    const n = buffer.length;
+    if(n>=cols || curRow>=rows) return;
+    const nextCol = cols - 1 - n;
+    const cell = gridEl.children[curRow*cols + nextCol];
+    if(!cell) return;
+    const blink = cell.querySelector('.blink');
+    if(blink) blink.classList.toggle('off', !blinkOn);
+  }
+
+  // ---------- evaluation (two-pass) ----------
+  function evaluateRow(secretStr, rowIdx){
+    const L = secretStr.length;
+    const secretArr = secretStr.split('');
+    const secCounts = {};
+    for(const d of secretArr) secCounts[d]=(secCounts[d]||0)+1;
+
+    for(let i=0;i<L;i++){
+      const g = answerMatrix[rowIdx][i];
+      if(g===secretArr[i]){
+        colorMatrix[rowIdx][i]='correct';
+        secCounts[g]-=1;
+      }else{
+        colorMatrix[rowIdx][i]='active';
+      }
+    }
+    for(let i=0;i<L;i++){
+      if(colorMatrix[rowIdx][i]==='correct') continue;
+      const g = answerMatrix[rowIdx][i];
+      if(g===' ') { colorMatrix[rowIdx][i]='active'; continue; }
+      if(secCounts[g]>0){ colorMatrix[rowIdx][i]='present'; secCounts[g]-=1; }
+      else{ colorMatrix[rowIdx][i]='absent'; }
+    }
+  }
+
+  // ---------- apply guess (deferred coloring + hints) ----------
+  function applyGuess(){
+    const guessStr = buffer.join('');
+    if (guessStr.length !== cols) return false;
+    const guessNum = parseInt(guessStr,10);
+
+    triesLeft -= 1;
+
+    const g = gcd(guessNum, secret);
+    const gcdMult = factorMultisetOf(g);
+
+    let revealsNew = false;
+    for(const p in gcdMult){
+      const have = discovered[p]||0;
+      if(gcdMult[p] > have){ revealsNew = true; break; }
+    }
+
+    if(revealsNew){
+      mergeMaxCounts(discovered, gcdMult);
+      pendingRows[curRow]=true;
+      updateHeaderPrimes();
+    }else{
+      if(bonus_hints > 0){
+        bonus_hints -= 1;
+        evaluateRow(String(secret), curRow);
+        pendingRows[curRow]=false;
+        for(let r=0;r<curRow;r++){
+          if(pendingRows[r]){
+            evaluateRow(String(secret), r);
+            pendingRows[r]=false;
+          }
+        }
+        renderAll();
+      }else{
+        pendingRows[curRow]=true;
+      }
+    }
+
+    const won = (guessNum===secret);
+    if(won){
+      const triesUsed = (DEFAULT_GUESSES_BY_DIGITS[SECRET_DIGITS]||rows) - triesLeft;
+      if(triesUsed <= ROUNDS_NEEDED_FOR_BONUS_HINT) {
+        // award a one-time carry bonus for the NEXT round
+        carryBonus += 1;
+      }
+      games_won += 1;
+      const roundLeft = triesLeft;
+      score += (roundLeft*roundLeft + 1) * SECRET_DIGITS;
+      showRoundWin();
+      return true;
+    }else if(triesLeft === 0){
+      for(let r=0;r<rows;r++){
+        if(pendingRows[r]){ evaluateRow(String(secret), r); pendingRows[r]=false; }
+      }
+      renderAll();
+      showFinalAndReset('loss');   // reveal secret on loss
+      return true;
+    }
+    return false;
+  }
+
+  function showRoundWin(){
+    running=false;
+    renderAll();
+    roundTitle.textContent = 'Correct';
+    roundScore.textContent = `Score: ${score}`;
+    roundModal.classList.add('show');
+  }
+
+  function showFinalAndReset(outcome){ // 'loss' | 'quit'
+    running=false;
+    finalScore.textContent = String(score);
+    if (outcome === 'loss') {
+      finalReveal.textContent = `The number was: ${secret}`;
+      finalReveal.style.display = '';
+    } else {
+      finalReveal.style.display = 'none';
+    }
+    finalModal.classList.add('show');
+  }
+
+  // ---------- round control ----------
+  function startRound(){
+    running=true;
+    initMatrices();
+    buildGrid();
+    secret = selectSecret();
+    updateHeaderPrimes();
+    updateFooter();
+    updateDebugSecret();
+    buffer=[];
+  }
+
+  // ---------- input ----------
+  function updateMatrixFromBuffer(){
+    for(let i=0;i<cols;i++) answerMatrix[curRow][i]=' ';
+    const start = cols - buffer.length;
+    for(let i=0;i<buffer.length;i++){
+      answerMatrix[curRow][start+i] = buffer[i];
+    }
+  }
+
+  document.addEventListener('keydown',(e)=>{
+    if(splashEl.classList.contains('show')) return;
+    if(howtoEl.classList.contains('show')){ howtoEl.classList.remove('show'); levelsEl.classList.add('show'); return; }
+    if(levelsEl.classList.contains('show')) return;
+    if(roundModal.classList.contains('show')) return;
+    if(finalModal.classList.contains('show')){ finalizeAndGoToLevelSelect(); return; }
+    if(!running) return;
+
+    if(/^[0-9]$/.test(e.key)){
+      if(buffer.length<cols){
+        if(!(buffer.length===0 && e.key==='0' && SECRET_DIGITS>1)){
+          buffer.push(e.key);
+          updateMatrixFromBuffer();
+          renderAll();
+        }
+      }
+      return;
+    }
+    if(e.key==='Backspace'){
+      buffer.pop();
+      updateMatrixFromBuffer();
+      renderAll();
+      e.preventDefault();
+      return;
+    }
+    if(e.key==='Enter'){
+      if(buffer.length === cols){
+        const ended = applyGuess();
+        if(!ended){
+          curRow += 1;
+          buffer=[];
+          renderAll();
+        }
+      }
+      return;
+    }
+    if(e.key.toLowerCase()==='q'){ showFinalAndReset('quit'); return; }  // quit (no reveal)
+    if(e.key.toLowerCase()==='n'){ finalizeAndGoToLevelSelect(); return; }
+  });
+
+  // ---------- overlays ----------
+  levelsEl.addEventListener('click',(e)=>{
+    const btn=e.target.closest('[data-level]');
+    if(!btn) return;
+    SECRET_DIGITS = parseInt(btn.dataset.level,10);
+    // reset run
+    score=0; games_won=1; bonus_hints=STARTING_HINTS; gameNum=0; carryBonus=0;
+    levelsEl.classList.remove('show');
+    rows = DEFAULT_GUESSES_BY_DIGITS[SECRET_DIGITS] || 6;
+    triesLeft = rows;
+    startRound();
+  });
+
+  roundOk.addEventListener('click',()=>{
+    roundModal.classList.remove('show');
+    gameNum += 1;
+    rows = DEFAULT_GUESSES_BY_DIGITS[SECRET_DIGITS] || 6;
+    triesLeft = rows;
+    startRound();
+  });
+
+  finalOk.addEventListener('click', finalizeAndGoToLevelSelect);
+  finalModal.addEventListener('click', finalizeAndGoToLevelSelect);
+
+  function finalizeAndGoToLevelSelect(){
+    finalModal.classList.remove('show');
+    score=0; games_won=1; bonus_hints=STARTING_HINTS; gameNum=0; carryBonus=0;
+    levelsEl.classList.add('show');
+  }
+
+  window.addEventListener('resize', ()=>{ if(running){ buildGrid(); }});
+
+  // splash → how-to
+  (async function boot(){
+    await new Promise(r=>setTimeout(r,900));
+    splashEl.classList.remove('show');
+    howtoEl.classList.add('show');
+  })();
+
+})();
+</script>
+</body>
+</html>
