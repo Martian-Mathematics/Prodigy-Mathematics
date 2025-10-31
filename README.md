@@ -4,4 +4,6 @@ Redistribution or modification prohibited.
 
 ## NUMBLE!
 Play the web version here:
-https://Martian-Mathematics.github.io/Prodigy-Mathematics/
+[https://Martian-Mathematics.github.io/Prodigy-Mathematics/
+](https://martian-mathematics.github.io/numble/
+)
